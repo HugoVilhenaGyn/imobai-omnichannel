@@ -2,10 +2,10 @@ import { supabase } from './supabase';
 
 const AI_DELAY = 1000; // Delay menor pois a chamada à API já demora um pouquinho
 
-async function callGenerativeAI(messageText, currentIntent, currentStatus) {
+async function callGenerativeAI(contactId, messageText, currentIntent, currentStatus) {
   // Ler configuração da interface gráfica local
   const savedConfigStr = localStorage.getItem('imobai_ai_config');
-  let localConfig = { active: true, apiKey: '', agentName: 'Corretor Virtual ImobAI', prompt: '' };
+  let localConfig = { active: true, apiKey: '', agentName: 'Corretor Virtual ImobAI', prompt: '', policies: '', catalog: '', contextDocs: '' };
   try { if (savedConfigStr) localConfig = JSON.parse(savedConfigStr); } catch (e) {}
 
   if (localConfig.active === false) {
@@ -19,34 +19,73 @@ async function callGenerativeAI(messageText, currentIntent, currentStatus) {
   }
 
   const agentName = localConfig.agentName || 'Assistente ImobAI';
-  const baseInstruction = localConfig.prompt || "Você é um corretor virtual simpático e extremamente prestativo da ImobAI.";
+  const baseInstruction = localConfig.prompt || "Você é um corretor virtual simpático e prestativo.";
 
   const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`;
 
-  const prompt = `INSTRUÇÕES DE DIRETRIZ E PERSONALIDADE:
+  // 1. MEMÓRIA: Buscar as últimas mensagens do banco para contexto da conversa
+  let geminiContents = [];
+  try {
+    const { data: historyItems } = await supabase
+      .from('messages')
+      .select('sender_type, content')
+      .eq('contact_id', contactId)
+      .order('created_at', { ascending: false })
+      .limit(8);
+
+    if (historyItems) {
+      // Ignoramos a mensagem atual caso o webhook já tenha inserido, e revertemos a ordem para cronológica
+      geminiContents = historyItems
+        .filter(msg => msg.content !== messageText)
+        .reverse()
+        .map(msg => ({
+          role: msg.sender_type === 'user' ? 'user' : 'model',
+          parts: [{ text: msg.content }]
+        }));
+    }
+  } catch (err) {
+    console.error("Erro ao puxar histórico de memória:", err);
+  }
+
+  // Adicionamos a fala mais recente obrigatoriamente no final
+  geminiContents.push({
+    role: "user",
+    parts: [{ text: messageText }]
+  });
+
+  // 2. ANTI-ALUCINAÇÃO E REGRAS MANDATÓRIAS (System Instruction)
+  const systemInstructionText = `INSTRUÇÕES BASE E PERSONALIDADE:
 O seu nome é: ${agentName}.
 ${baseInstruction}
 
-O cliente enviou a seguinte mensagem: "${messageText}"
+REGRAS ESTRITAS E POLÍTICAS DE ATENDIMENTO (TRAVA ANTI-ALUCINAÇÃO):
+As seguintes regras são a LEI. Nunca as viole, nunca invente informações fora delas:
+${localConfig.policies || '1. Seja educado e responda com base nos conhecimentos da imobiliária.'}
 
-O status atual dele no funil (banco de dados) é: "${currentStatus}"
-E a intenção atual é: "${currentIntent}"
+CONTEXTO INSTITUCIONAL E MATERIAL DE CONSULTA (FAQ):
+Utilize o material abaixo para responder a dúvidas gerais sobre a empresa, regras de locação, documentos e forma de trabalho:
+${localConfig.contextDocs || 'Nenhuma FAQ ou material institucional fornecido.'}
 
-Analise a intenção e RETORNE APENAS UM JSON VÁLIDO.
-Estrutura do JSON Esperado:
+CATÁLOGO DE IMÓVEIS E BASE DE CONHECIMENTO DISPONÍVEL:
+Só oferte imóveis que estejam explícitos na lista abaixo. Se o cliente perguntar algo que não está aqui, diga que não encontrou ou vai ver com a equipe:
+${localConfig.catalog || 'Nenhum catálogo específico cadastrado.'}
+
+MECÂNICA E FORMATO DE SAÍDA MANDATÓRIO (JSON):
+Sua resposta DITA O SISTEMA. Analise a memória da conversa mais acima, o status atual (${currentStatus}) e a intenção atual (${currentIntent}).
+RETORNE EXATAMENTE UM JSON VÁLIDO.
 {
-  "resposta": "Sua mensagem direta para o cliente simulando que vc está digitando no WhatsApp.",
-  "intent": "vendas" | "locacao" | "captacao" | "indefinido" (Mude baseado no que ele disse),
-  "status": "novo_contato" | "triagem_ia" | "qualificado" | "novo_lead" (Mova para 'novo_lead' se ele pedir corretor humano ou para terminar).
-}
-Certifique-se de que a saída seja APENAS JSON sem marcação markdown.`;
+  "resposta": "Sua mensagem pro cliente conversando de forma natural e empática, seguindo as regras Anti-Alucinação.",
+  "intent": "vendas" | "locacao" | "captacao" | "indefinido",
+  "status": "novo_contato" | "triagem_ia" | "qualificado" | "novo_lead" (Altere para novo_lead se o cliente pedir atendimento humano claro)
+}`;
 
   try {
     const res = await fetch(url, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        contents: [{ parts: [{ text: prompt }] }],
+        system_instruction: { parts: [{ text: systemInstructionText }] },
+        contents: geminiContents,
         generationConfig: {
           responseMimeType: "application/json"
         }
@@ -81,8 +120,8 @@ export async function processAILogic(newMessage) {
     let novoIntent = contact.intent || 'vendas';
     let novoStatus = contact.status || 'novo_contato';
 
-    // Chama o cébero real (Gemini) passando a mensagem e o estado atual
-    const aiMinds = await callGenerativeAI(newMessage.content, contact.intent, contact.status);
+    // Chama o cébero real (Gemini) passando o contato, histórico em memória e estado atual
+    const aiMinds = await callGenerativeAI(contact.id, newMessage.content, contact.intent, contact.status);
 
     if (aiMinds && aiMinds.abort) {
       console.log('IA desativada. Nenhuma ação tomada.');
