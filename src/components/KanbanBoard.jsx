@@ -1,51 +1,40 @@
 import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Plus, MoreVertical, Building, Key, Home, Loader2 } from 'lucide-react';
+// Somente ícones que sabemos que funcionam
+import { Plus, MoreVertical, Building, Key, Home, Loader2, Search, Filter, MessageCircle, Bot, User, Clock, ChevronDown } from 'lucide-react';
 import { supabase } from '../lib/supabase';
+import { formatPhone } from '../lib/formatPhone';
 import './KanbanBoard.css';
 
 const columns = [
-  { id: 'novo_lead', title: 'Novo Lead', color: 'var(--accent-primary)' },
-  { id: 'contatado', title: 'Contatado', color: '#10B981' },
-  { id: 'qualificado', title: 'Qualificado', color: '#F59E0B' },
-  { id: 'negociacao_visita', title: 'Visita / Negociação', color: '#8B5CF6' },
-  { id: 'ganho_fechado', title: 'Fechado', color: '#14B8A6' }
+  { id: 'novo_lead', title: 'Novo Lead', color: 'var(--accent-primary)', description: 'Triagem inicial' },
+  { id: 'contatado', title: 'Contatado', color: '#10B981', description: 'Primeiro contato feito' },
+  { id: 'qualificado', title: 'Qualificado', color: '#F59E0B', description: 'Lead com potencial' },
+  { id: 'negociacao_visita', title: 'Visita / Negociação', color: '#8B5CF6', description: 'Em andamento' },
+  { id: 'ganho_fechado', title: 'Fechado', color: '#14B8A6', description: 'Contrato assinado' }
 ];
 
+const ChannelIcon = ({ channel }) => {
+  // Simplificado para evitar erros de ícone inexistente
+  return <div style={{ fontSize: '10px' }}>🌐</div>;
+};
+
 export default function KanbanBoard() {
-  const [funnel, setFunnel] = useState('vendas'); // vendas, locacao, captacao
+  const [funnel, setFunnel] = useState('vendas');
   const [contacts, setContacts] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [searchTerm, setSearchTerm] = useState('');
 
   useEffect(() => {
     fetchContacts();
-    
-    // Inscrever-se para atualizações em tempo real (Realtime subscriptions)
-    const channel = supabase
-      .channel('contacts_changes')
-      .on(
-        'postgres_changes',
-        { event: '*', schema: 'public', table: 'contacts' },
-        (payload) => {
-          console.log('Mudança detectada no banco:', payload);
-          fetchContacts(); // Recarrega os dados ao detectar mudanças de outro local/user
-        }
-      )
-      .subscribe();
-
-    return () => {
-      supabase.removeChannel(channel);
-    };
+    const channel = supabase.channel('contacts_changes').on('postgres_changes', { event: '*', schema: 'public', table: 'contacts' }, () => fetchContacts()).subscribe();
+    return () => { supabase.removeChannel(channel); };
   }, []);
 
   const fetchContacts = async () => {
     try {
       setLoading(true);
-      const { data, error } = await supabase
-        .from('contacts')
-        .select('*')
-        .order('updated_at', { ascending: false });
-
+      const { data, error } = await supabase.from('contacts').select('*').order('updated_at', { ascending: false });
       if (error) throw error;
       setContacts(data || []);
     } catch (err) {
@@ -53,6 +42,18 @@ export default function KanbanBoard() {
     } finally {
       setLoading(false);
     }
+  };
+
+  const getTimeAgo = (dateString) => {
+    if (!dateString) return '---';
+    const now = new Date();
+    const updated = new Date(dateString);
+    if (isNaN(updated.getTime())) return '---';
+    const diff = Math.floor((now - updated) / 60000);
+    if (diff < 1) return 'Agora';
+    if (diff < 60) return `${diff}m`;
+    if (diff < 1440) return `${Math.floor(diff / 60)}h`;
+    return `${Math.floor(diff / 1440)}d`;
   };
 
   const handleDragStart = (e, card, fromColumn) => {
@@ -64,118 +65,63 @@ export default function KanbanBoard() {
     e.preventDefault();
     const cardId = e.dataTransfer.getData('cardId');
     const fromColumn = e.dataTransfer.getData('fromColumn');
-    
     if (fromColumn === toColumn) return;
 
-    // 1. Atualização Otimista na Interface
-    setContacts(prev => 
-      prev.map(c => c.id === cardId ? { ...c, status: toColumn } : c)
-    );
-
-    // 2. Atualização no Banco de Dados
-    const { error } = await supabase
-      .from('contacts')
-      .update({ status: toColumn })
-      .eq('id', cardId);
-
-    if (error) {
-      console.error('Erro ao mover card:', error);
-      fetchContacts(); // Faz rollback local se o banco der erro
-    }
+    setContacts(prev => prev.map(c => c.id === cardId ? { ...c, status: toColumn } : c));
+    await supabase.from('contacts').update({ status: toColumn, updated_at: new Date().toISOString() }).eq('id', cardId);
   };
 
-  const handleDragOver = (e) => {
-    e.preventDefault();
-  };
-
-  // Botão para simular a criação de um novo lead
-  const handleAddTestLead = async (colId) => {
-    const newContact = {
-      name: 'Lead Teste ' + Math.floor(Math.random() * 1000),
-      phone: '11988887777',
-      intent: funnel,
-      status: colId,
-      original_channel: 'whatsapp'
-    };
-    
-    // Mostra um feedback visual de que está carregando na interface?
-    console.log("Inserindo novo contato:", newContact);
-
-    const { error } = await supabase.from('contacts').insert([newContact]);
-    
-    if (error) {
-      console.error('Erro ao inserir lead:', error);
-      alert('Erro ao tentar inserir no Supabase: ' + error.message);
-    } else {
-      // Como o recurso de "Realtime" (WebSocket) pode não estar habilitado 
-      // por padrão na tabela `contacts` do seu Supabase, nós forçamos 
-      // uma busca manual para a tela atualizar imediatamente:
-      fetchContacts();
-    }
-  };
+  const filteredContacts = contacts.filter(c => 
+    (c.name?.toLowerCase().includes(searchTerm.toLowerCase()) || c.phone?.includes(searchTerm)) &&
+    c.intent === funnel
+  );
 
   return (
     <div className="kanban-wrapper">
-      <div className="kanban-tabs glass-panel">
-        <button className={`k-tab ${funnel === 'vendas' ? 'active' : ''}`} onClick={() => setFunnel('vendas')}>
-          <Building size={16} /> Vendas
-        </button>
-        <button className={`k-tab ${funnel === 'locacao' ? 'active' : ''}`} onClick={() => setFunnel('locacao')}>
-          <Key size={16} /> Locação
-        </button>
-        <button className={`k-tab ${funnel === 'captacao' ? 'active' : ''}`} onClick={() => setFunnel('captacao')}>
-          <Home size={16} /> Captação
-        </button>
+      <div className="kanban-actions-bar">
+        <div className="kanban-tabs glass-panel">
+          <button className={`k-tab ${funnel === 'vendas' ? 'active' : ''}`} onClick={() => setFunnel('vendas')}><Building size={16} /> Vendas</button>
+          <button className={`k-tab ${funnel === 'locacao' ? 'active' : ''}`} onClick={() => setFunnel('locacao')}><Key size={16} /> Locação</button>
+          <button className={`k-tab ${funnel === 'captacao' ? 'active' : ''}`} onClick={() => setFunnel('captacao')}><Home size={16} /> Captação</button>
+        </div>
+        <div className="kanban-search-group glass-panel">
+          <Search size={18} />
+          <input type="text" placeholder="Buscar lead..." value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} />
+        </div>
       </div>
 
       <div className="kanban-board">
         {loading && contacts.length === 0 ? (
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: '100%', color: 'var(--text-muted)' }}>
-            <Loader2 className="animate-spin" style={{ marginRight: 8, animation: 'spin 1s linear infinite' }} /> Carregando contatos vivos...
-          </div>
+          <div className="kanban-loading"><Loader2 className="animate-spin" /></div>
         ) : (
           columns.map(col => {
-            const columnContacts = contacts.filter(c => c.intent === funnel && c.status === col.id);
+            const colContacts = filteredContacts.filter(c => c.status === col.id);
             return (
-              <div 
-                key={col.id} 
-                className="kanban-col glass-panel"
-                onDrop={(e) => handleDrop(e, col.id)}
-                onDragOver={handleDragOver}
-              >
+              <div key={col.id} className="kanban-col" onDrop={(e) => handleDrop(e, col.id)} onDragOver={(e) => e.preventDefault()}>
                 <div className="col-header">
-                  <div className="col-title">
+                  <div className="col-title-group">
                     <div className="col-indicator" style={{ backgroundColor: col.color }}></div>
-                    <h3>{col.title}</h3>
-                    <span className="col-count">
-                      {columnContacts.length}
-                    </span>
+                    <div>
+                      <h3>{col.title}</h3>
+                      <p style={{ fontSize: '10px', color: 'gray' }}>{col.description}</p>
+                    </div>
                   </div>
-                  <button className="add-btn" onClick={() => handleAddTestLead(col.id)} title="Adicionar Card de Teste Real">
-                    <Plus size={16} />
-                  </button>
+                  <span className="col-count">{colContacts.length}</span>
                 </div>
-                
                 <div className="col-body">
                   <AnimatePresence>
-                    {columnContacts.map(card => (
-                        <motion.div
-                          layout
-                          initial={{ opacity: 0, y: -10 }}
-                          animate={{ opacity: 1, y: 0 }}
-                          exit={{ opacity: 0, scale: 0.9 }}
-                          key={card.id}
-                          className="kanban-card glass-panel"
-                          draggable
-                          onDragStart={(e) => handleDragStart(e, card, col.id)}
-                        >
-                          <div className="card-top">
-                            <span className="card-id">#{card.id.split('-')[0]}</span>
-                            <MoreVertical size={14} className="card-more" />
-                          </div>
-                          <h4>{card.name}</h4>
-                          <p>{card.phone} • {card.original_channel}</p>
-                        </motion.div>
+                    {colContacts.map(card => (
+                      <motion.div layout key={card.id} className="kanban-card glass-panel" draggable onDragStart={(e) => handleDragStart(e, card, col.id)}>
+                        <div className="card-labels">
+                           <ChannelIcon channel={card.original_channel} />
+                           {card.handled_by_ai ? <span style={{ fontSize: '10px', color: 'purple' }}>🤖 IA</span> : <span style={{ fontSize: '10px', color: 'orange' }}>👤 Humano</span>}
+                        </div>
+                        <h4 style={{ margin: '5px 0' }}>{card.name}</h4>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '12px', color: 'gray' }}>
+                          <span>{formatPhone(card.phone)}</span>
+                          <span>{getTimeAgo(card.updated_at || card.created_at)}</span>
+                        </div>
+                      </motion.div>
                     ))}
                   </AnimatePresence>
                 </div>

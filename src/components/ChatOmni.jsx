@@ -1,7 +1,11 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Send, Phone, Video, MoreVertical, Bot, User, CheckCircle2, Loader2, MessageSquare } from 'lucide-react';
 import { supabase } from '../lib/supabase';
+import { io } from 'socket.io-client';
+import { formatPhone } from '../lib/formatPhone';
 import './ChatOmni.css';
+
+const socket = io('http://localhost:3001');
 
 export default function ChatOmni() {
   const [contacts, setContacts] = useState([]);
@@ -11,6 +15,13 @@ export default function ChatOmni() {
   const [loadingContacts, setLoadingContacts] = useState(true);
   const [loadingMessages, setLoadingMessages] = useState(false);
   const messagesEndRef = useRef(null);
+
+  const activeContactRef = useRef(null);
+
+  // Manter ref sincronizado com o state
+  useEffect(() => {
+    activeContactRef.current = activeContact;
+  }, [activeContact]);
 
   // Busca lista de contatos ao montar o componente
   useEffect(() => {
@@ -24,11 +35,9 @@ export default function ChatOmni() {
       })
       .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'messages' }, (payload) => {
         // Se a mensagem for para o contato atual aberto, busca as mensagens dele de novo
-        // (o ideal seria injetar no estado direto, mas buscar garante ordem e IDs)
         setMessages(prev => {
           const isForActiveContact = prev.length > 0 && prev[0].contact_id === payload.new.contact_id;
           if (isForActiveContact) {
-            // Um pequeno delay garante consistência no DB antes de buscar
             setTimeout(() => fetchMessagesLocal(payload.new.contact_id), 100);
           }
           return prev;
@@ -36,8 +45,21 @@ export default function ChatOmni() {
       })
       .subscribe();
 
+    // ESCUTA WHATSAPP VIA SOCKET.IO (caminho direto, sem depender do Supabase Realtime)
+    socket.on('new_whatsapp_message', (data) => {
+      console.log('📩 Mensagem WhatsApp recebida no Chat:', data);
+      fetchContacts(); // Atualiza lista de contatos (pode ter um novo)
+      
+      const current = activeContactRef.current;
+      if (current && data.contact && current.id === data.contact.id) {
+        // Se o chat aberto é do mesmo contato, recarrega as mensagens
+        fetchMessagesLocal(current.id);
+      }
+    });
+
     return () => {
       supabase.removeChannel(channel);
+      socket.off('new_whatsapp_message');
     };
   }, []);
 
@@ -124,6 +146,15 @@ export default function ChatOmni() {
       fetchMessagesLocal(activeContact.id); // Rollback da mensagem temporária em caso de erro
     } else {
       fetchMessagesLocal(activeContact.id); // Busca a mensagem confirmada
+
+      // Mantém o contato no topo da lista após envio do corretor
+      supabase.from('contacts').update({ updated_at: new Date().toISOString() }).eq('id', activeContact.id);
+
+      // 🌐 INTEGRAÇÃO WHATSAPP:
+      // Se for um envio humano e o contato for do canal WhatsApp, envia pro Node.js!
+      if (forcedSenderType === 'human_agent' && activeContact.original_channel === 'whatsapp' && activeContact.phone) {
+          socket.emit('send_whatsapp_message', { phone: activeContact.phone, message: sentText });
+      }
       
       // Como o Supabase Realtime pode estar desligado por padrão no projeto, 
       // nós ativamos a IA programaticamente logo em seguida para garantir a simulação:
@@ -210,7 +241,7 @@ export default function ChatOmni() {
                     <h4 className="c-name">{safeStr(c.name) || 'Sem Nome'}</h4>
                     <span className="c-time">{formatTime(c.updated_at)}</span>
                   </div>
-                  <p className="c-msg">{safeStr(c.phone) || safeStr(c.email) || 'Sem contato'}</p>
+                  <p className="c-msg">{formatPhone(c.phone) || safeStr(c.email) || 'Sem contato'}</p>
                   <div className="c-tags">
                     {c.handled_by_ai ? (
                       <span className="c-status" style={{color: 'var(--accent-primary)'}}>Robô</span>
@@ -237,8 +268,9 @@ export default function ChatOmni() {
               <div className="active-user-info">
                 <div className="avatar bg-accent-primary"><User size={20} /></div>
                 <div>
-                  <h3>{safeStr(activeContact.name) || safeStr(activeContact.phone) || 'Novo Lead'}</h3>
+                  <h3>{safeStr(activeContact.name) || formatPhone(activeContact.phone) || 'Novo Lead'}</h3>
                   <span className="active-status" style={{fontSize: '12px', opacity: 0.8}}>
+                    {formatPhone(activeContact.phone) && <>{formatPhone(activeContact.phone)} · </>}
                     {activeContact.handled_by_ai ? '🤖 Sendo atendido pela IA' : 'Corretor Assumiu'}
                   </span>
                 </div>

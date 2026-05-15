@@ -1,4 +1,7 @@
 import { supabase } from './supabase';
+import { io } from 'socket.io-client';
+
+const waSocket = io('http://localhost:3001', { autoConnect: true, reconnectionAttempts: 5 });
 
 const AI_DELAY = 1000; // Delay menor pois a chamada à API já demora um pouquinho
 
@@ -149,14 +152,19 @@ export async function processAILogic(newMessage) {
       console.log(`🤖 CÉREBRO IA atualizou Kanban: Funil '${novoIntent}' -> Coluna '${novoStatus}'`);
     }
 
-    // Aguarda o término da inserção diretamente, sem setTimeout, para que a 
+    // Aguarda o término da inserção diretamente, sem setTimeout, para que a
     // promessa principal seja cumprida no tempo exato que o Gemini respondeu
     await supabase.from('messages').insert([{
       contact_id: contact.id,
       sender_type: 'ai_agent',
       content: respostaIA
     }]);
-    
+
+    // Envia a resposta da IA de volta ao WhatsApp do cliente
+    if (contact.original_channel === 'whatsapp' && contact.phone) {
+      waSocket.emit('send_whatsapp_message', { phone: contact.phone, message: respostaIA });
+    }
+
     return true; // Sucesso
 
   } catch (err) {

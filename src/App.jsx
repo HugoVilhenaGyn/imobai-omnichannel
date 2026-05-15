@@ -7,6 +7,8 @@ import Topbar from './components/Topbar';
 import KanbanBoard from './components/KanbanBoard';
 import ChatOmni from './components/ChatOmni';
 import AIAgentConfig from './components/AIAgentConfig';
+import Settings from './components/Settings';
+import WhatsAppManager from './components/WhatsAppManager';
 import Login from './components/Login';
 import { supabase, checkConnection } from './lib/supabase';
 import { startAIEngine } from './lib/ai-engine';
@@ -39,8 +41,10 @@ export default function App() {
   useEffect(() => {
     const initApp = async () => {
       try {
+        console.log("Iniciando initApp...");
         // Verificar conexão mínima
         const conn = await checkConnection();
+        console.log("Conexão Supabase:", conn);
         if (!conn.ok) {
           setConnectionError(conn.error);
         }
@@ -79,13 +83,14 @@ export default function App() {
   }, [session]);
 
   const getPageInfo = () => {
-    if (currentView === 'kanban') {
-      return { title: 'Kanban Pipeline', subtitle: 'Gestão de leads: Venda, Locação e Captação' };
-    }
-    if (currentView === 'ai-config') {
-      return { title: 'Agente Virtual IA', subtitle: 'Treinamento, configurações e chaves de API do Cérebro (Gemini)' };
-    }
-    return { title: 'Chat Omnichannel', subtitle: 'Orquestração de contatos e IA' };
+    const map = {
+      kanban:       { title: 'Dashboard',            subtitle: 'Gestão de leads: Venda, Locação e Captação' },
+      omni:         { title: 'Chat',                 subtitle: 'Orquestração de contatos e atendimento por IA' },
+      whatsapp:     { title: 'Contas de WhatsApp',   subtitle: 'Conexão e gerenciamento do número WhatsApp da conta' },
+      'ai-config':  { title: 'Agente Virtual IA',    subtitle: 'Treinamento, configurações e chaves de API do Cérebro (Gemini)' },
+      settings:     { title: 'Configurações',        subtitle: 'Gerencie sua conta, integrações, canais e preferências' },
+    };
+    return map[currentView] || { title: 'Em breve', subtitle: 'Este módulo está em desenvolvimento' };
   };
 
   const { title, subtitle } = getPageInfo();
@@ -178,6 +183,30 @@ export default function App() {
                 style={{ height: '100%', display: 'flex', flexDirection: 'column', overflowY: 'auto' }}
               >
                 <AIAgentConfig />
+              </motion.div>
+            )}
+            {currentView === 'settings' && (
+              <motion.div
+                key="settings-view"
+                initial={{ opacity: 0, y: 10 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -10 }}
+                transition={{ duration: 0.3 }}
+                style={{ height: '100%', display: 'flex', flexDirection: 'column' }}
+              >
+                <Settings />
+              </motion.div>
+            )}
+            {currentView === 'whatsapp' && (
+              <motion.div
+                key="whatsapp-view"
+                initial={{ opacity: 0, y: 10 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -10 }}
+                transition={{ duration: 0.3 }}
+                style={{ height: '100%', overflowY: 'auto', padding: '1.5rem' }}
+              >
+                <WhatsAppManager />
               </motion.div>
             )}
           </AnimatePresence>
