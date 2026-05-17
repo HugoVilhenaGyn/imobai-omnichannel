@@ -36,18 +36,18 @@ MUITO IMPORTANTE: Não invente dados de imóveis, apenas faça triagem.`);
     try {
       const arrayBuffer = await file.arrayBuffer();
       const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
-      
+
       let fullText = `\n--- Importado do arquivo: ${file.name} ---\n`;
-      
+
       for (let i = 1; i <= pdf.numPages; i++) {
         const page = await pdf.getPage(i);
         const textContent = await page.getTextContent();
         const pageStrings = textContent.items.map(item => item.str);
         fullText += pageStrings.join(' ') + '\n';
       }
-      
+
       setContextDocs(prev => prev + '\n' + fullText);
-      
+
     } catch (err) {
       console.error("Erro ao processar PDF:", err);
       alert("Não foi possível ler o texto deste PDF.");
@@ -104,20 +104,20 @@ MUITO IMPORTANTE: Não invente dados de imóveis, apenas faça triagem.`);
           <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
               <h3 style={{ fontSize: '1.1rem', color: 'var(--text-main)', margin: 0 }}>Cérebro da IA</h3>
-              
+
               {/* Badge Pulsante de Status Constante */}
-              <div style={{ 
-                display: 'flex', alignItems: 'center', gap: '6px', fontSize: '0.75rem', fontWeight: 600, 
-                padding: '4px 10px', borderRadius: '12px', 
-                backgroundColor: active ? (apiKey.length > 5 ? 'rgba(16, 185, 129, 0.1)' : 'rgba(245, 158, 11, 0.1)') : 'rgba(239, 68, 68, 0.1)', 
+              <div style={{
+                display: 'flex', alignItems: 'center', gap: '6px', fontSize: '0.75rem', fontWeight: 600,
+                padding: '4px 10px', borderRadius: '12px',
+                backgroundColor: active ? (apiKey.length > 5 ? 'rgba(16, 185, 129, 0.1)' : 'rgba(245, 158, 11, 0.1)') : 'rgba(239, 68, 68, 0.1)',
                 color: active ? (apiKey.length > 5 ? '#10b981' : '#f59e0b') : '#ef4444',
                 border: `1px solid ${active ? (apiKey.length > 5 ? 'rgba(16, 185, 129, 0.3)' : 'rgba(245, 158, 11, 0.3)') : 'rgba(239, 68, 68, 0.3)'}`
               }}>
-                <motion.div 
-                  animate={ active && apiKey.length > 5 ? { scale: [1, 1.8, 1], opacity: [1, 0.4, 1] } : {}}
+                <motion.div
+                  animate={active && apiKey.length > 5 ? { scale: [1, 1.8, 1], opacity: [1, 0.4, 1] } : {}}
                   transition={{ repeat: Infinity, duration: 1.5, ease: "easeInOut" }}
-                  style={{ 
-                    width: '8px', height: '8px', borderRadius: '50%', 
+                  style={{
+                    width: '8px', height: '8px', borderRadius: '50%',
                     backgroundColor: active ? (apiKey.length > 5 ? '#10b981' : '#f59e0b') : '#ef4444',
                     boxShadow: active && apiKey.length > 5 ? '0 0 8px #10b981' : 'none'
                   }}
@@ -254,15 +254,15 @@ MUITO IMPORTANTE: Não invente dados de imóveis, apenas faça triagem.`);
               </p>
             </div>
             <div>
-              <input 
-                type="file" 
-                accept=".pdf" 
-                id="pdf-upload" 
-                style={{ display: 'none' }} 
-                onChange={handleFileUpload} 
+              <input
+                type="file"
+                accept=".pdf"
+                id="pdf-upload"
+                style={{ display: 'none' }}
+                onChange={handleFileUpload}
               />
-              <label 
-                htmlFor="pdf-upload" 
+              <label
+                htmlFor="pdf-upload"
                 style={{
                   display: 'flex', alignItems: 'center', gap: '6px', fontSize: '0.8rem', fontWeight: 600,
                   backgroundColor: 'rgba(56, 189, 248, 0.1)', color: '#38bdf8', padding: '8px 12px',

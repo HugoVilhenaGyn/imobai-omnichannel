@@ -1,11 +1,15 @@
 import { supabase } from './supabase';
 import { io } from 'socket.io-client';
 
-const waSocket = io('http://localhost:3001', { autoConnect: true, reconnectionAttempts: 5 });
+const waSocket = io('http://localhost:3001', { autoConnect: true });
 
-const AI_DELAY = 1000; // Delay menor pois a chamada à API já demora um pouquinho
+waSocket.on('connect', () => console.log('🔌 ai-engine: socket conectado ao whatsapp-service'));
+waSocket.on('disconnect', () => console.log('🔌 ai-engine: socket desconectado'));
 
-async function callGenerativeAI(contactId, messageText, currentIntent, currentStatus) {
+// Dedup: evita processar duas vezes a mesma mensagem (socket + Realtime)
+const _processing = new Map();
+
+async function callGenerativeAI(contactId, messageText, currentIntent, currentStatus, phonePending = false) {
   // Ler configuração da interface gráfica local
   const savedConfigStr = localStorage.getItem('imobai_ai_config');
   let localConfig = { active: true, apiKey: '', agentName: 'Corretor Virtual ImobAI', prompt: '', policies: '', catalog: '', contextDocs: '' };
@@ -57,6 +61,13 @@ async function callGenerativeAI(contactId, messageText, currentIntent, currentSt
   });
 
   // 2. ANTI-ALUCINAÇÃO E REGRAS MANDATÓRIAS (System Instruction)
+  const phoneNote = phonePending
+    ? `\n\nCADASTRO INCOMPLETO — AÇÃO OBRIGATÓRIA:
+O sistema não conseguiu identificar o número de telefone deste contato automaticamente (o WhatsApp usa formato de privacidade @lid que oculta o número real).
+Se o histórico acima tiver poucas mensagens (primeiro ou segundo contato), inclua ao final da sua resposta um pedido gentil: "Para melhor te atender, poderia me informar seu número de WhatsApp ou celular?"
+Se o cliente já respondeu com um número nas mensagens anteriores, NÃO peça de novo.`
+    : '';
+
   const systemInstructionText = `INSTRUÇÕES BASE E PERSONALIDADE:
 O seu nome é: ${agentName}.
 ${baseInstruction}
@@ -80,7 +91,7 @@ RETORNE EXATAMENTE UM JSON VÁLIDO.
   "resposta": "Sua mensagem pro cliente conversando de forma natural e empática, seguindo as regras Anti-Alucinação.",
   "intent": "vendas" | "locacao" | "captacao" | "indefinido",
   "status": "novo_contato" | "triagem_ia" | "qualificado" | "novo_lead" (Altere para novo_lead se o cliente pedir atendimento humano claro)
-}`;
+}${phoneNote}`;
 
   try {
     const res = await fetch(url, {
@@ -110,6 +121,11 @@ RETORNE EXATAMENTE UM JSON VÁLIDO.
 export async function processAILogic(newMessage) {
   if (newMessage.sender_type !== 'user') return;
 
+  const dedupKey = `${newMessage.contact_id}:${newMessage.content}`;
+  const lastTs = _processing.get(dedupKey);
+  if (lastTs && Date.now() - lastTs < 30000) return;
+  _processing.set(dedupKey, Date.now());
+
   try {
     const { data: contact } = await supabase
       .from('contacts')
@@ -123,12 +139,12 @@ export async function processAILogic(newMessage) {
     let novoIntent = contact.intent || 'vendas';
     let novoStatus = contact.status || 'novo_contato';
 
-    // Chama o cébero real (Gemini) passando o contato, histórico em memória e estado atual
-    const aiMinds = await callGenerativeAI(contact.id, newMessage.content, contact.intent, contact.status);
+    const phonePending = Boolean(contact.phone && /^\d{14,}$/.test(contact.phone));
+    const aiMinds = await callGenerativeAI(contact.id, newMessage.content, contact.intent, contact.status, phonePending);
 
     if (aiMinds && aiMinds.abort) {
       console.log('IA desativada. Nenhuma ação tomada.');
-      return; 
+      return;
     }
 
     if (aiMinds && aiMinds.resposta) {
@@ -136,14 +152,12 @@ export async function processAILogic(newMessage) {
       novoIntent = aiMinds.intent || contact.intent;
       novoStatus = aiMinds.status || contact.status;
     } else {
-      // Simulação Hardcoded caso não ache a chave de API
       const texto = newMessage.content.toLowerCase();
-      if (texto.includes('comprar')) { novoIntent = 'vendas'; novoStatus = 'qualificado'; respostaIA = "(Simulação sem API Key) Excelente! Que tipo de imóvel para compra?"; } 
+      if (texto.includes('comprar')) { novoIntent = 'vendas'; novoStatus = 'qualificado'; respostaIA = "(Simulação sem API Key) Excelente! Que tipo de imóvel para compra?"; }
       else if (texto.includes('alugar')) { novoIntent = 'locacao'; novoStatus = 'qualificado'; respostaIA = "(Simulação sem API Key) Perfeito! Locação residencial ou comercial?"; }
       else { novoStatus = 'triagem_ia'; respostaIA = "(Simulação sem API Key) Olá! Você deseja comprar, alugar ou anunciar conosco?"; }
     }
 
-    // Se houve mudança no nível/funil, atualiza no Kanban via tabela 'contacts'
     if (novoIntent !== contact.intent || novoStatus !== contact.status) {
       await supabase
         .from('contacts')
@@ -152,40 +166,26 @@ export async function processAILogic(newMessage) {
       console.log(`🤖 CÉREBRO IA atualizou Kanban: Funil '${novoIntent}' -> Coluna '${novoStatus}'`);
     }
 
-    // Aguarda o término da inserção diretamente, sem setTimeout, para que a
-    // promessa principal seja cumprida no tempo exato que o Gemini respondeu
     await supabase.from('messages').insert([{
       contact_id: contact.id,
       sender_type: 'ai_agent',
       content: respostaIA
     }]);
 
-    // Envia a resposta da IA de volta ao WhatsApp do cliente
     if (contact.original_channel === 'whatsapp' && contact.phone) {
       waSocket.emit('send_whatsapp_message', { phone: contact.phone, message: respostaIA });
     }
 
-    return true; // Sucesso
+    return true;
 
   } catch (err) {
     console.error("Erro no Motor IA:", err);
+    // Limpa dedup para permitir retry pelo fallback Realtime
+    _processing.delete(dedupKey);
     return false;
   }
 }
 
 export function startAIEngine() {
-  console.log("🤖 Motor de Inteligência Artificial ImobAI Iniciado!");
-
-  const subscription = supabase
-    .channel('ai_listener')
-    .on(
-      'postgres_changes',
-      { event: 'INSERT', schema: 'public', table: 'messages' },
-      async (payload) => {
-        processAILogic(payload.new);
-      }
-    )
-    .subscribe();
-
-  return subscription;
+  console.log("🤖 Motor de Inteligência Artificial ImobAI Iniciado! (disparo via Socket.IO)");
 }

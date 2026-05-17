@@ -1,6 +1,16 @@
+// Retorna true se o valor parece um LID interno do WhatsApp (14+ dígitos, não é número de telefone)
+export function isLidPhone(phone) {
+  if (!phone) return false;
+  const digits = String(phone).replace(/\D/g, '');
+  return digits.length >= 14;
+}
+
 export function formatPhone(raw) {
   if (!raw) return '';
   const digits = String(raw).replace(/\D/g, '');
+
+  // LID interno do WhatsApp — não é um número de telefone, não deve ser formatado
+  if (digits.length >= 14) return raw;
 
   // Número brasileiro com DDI 55
   if (digits.startsWith('55') && digits.length >= 12) {
@@ -8,11 +18,9 @@ export function formatPhone(raw) {
     const ddd = local.slice(0, 2);
     const rest = local.slice(2);
     if (rest.length === 9) {
-      // Celular: 9 dígitos
       return `+55 ${ddd} ${rest.slice(0, 5)}-${rest.slice(5)}`;
     }
     if (rest.length === 8) {
-      // Fixo: 8 dígitos
       return `+55 ${ddd} ${rest.slice(0, 4)}-${rest.slice(4)}`;
     }
   }

@@ -26,6 +26,15 @@ Até o momento, a aplicação conta com uma infraestrutura sólida de front-end 
 - Temas **Dark Mode** e **Light Mode**, com preferência salva localmente.
 - Layout de painel estilo "Dashboard", com barra lateral retrátil (Sidebar) e Topbar contextual.
 
+### 5. 📱 Microserviço WhatsApp (QR Code)
+- Um backend independente (Node.js/Express) criado na pasta `whatsapp-service/`.
+- Integra a biblioteca `whatsapp-web.js` para rodar o cliente web (via Puppeteer).
+- Comunicação em tempo real com o Frontend via `Socket.io` para envio da string do QR Code e atualizações de status.
+- **Recebimento de Mensagens:** Mensagens recebidas no WhatsApp são automaticamente salvas no Supabase (tabela `contacts` + `messages`) e disparadas via Socket.io para o `ChatOmni` em tempo real.
+- **Envio de Mensagens:** Quando o corretor responde pelo chat da plataforma, a mensagem é enviada diretamente ao WhatsApp do cliente via `whatsapp-web.js`.
+- **Controles na Interface:** Botões de "Conectar", "Desconectar" e "Gerar Novo QR" na tela de Configurações > Canais & Integrações.
+- **Proteção contra crash:** Trava anti-duplo clique, recriação segura do client Puppeteer, e handlers globais de erro (`uncaughtException`/`unhandledRejection`).
+
 ---
 
 ## 🛠️ Stack Tecnológica
@@ -48,6 +57,7 @@ O script `supabase_setup.sql` gerou o esquema transacional principal:
 
 ---
 
+
 ## 🚀 Como Rodar o Projeto (Ambiente de Desenvolvimento)
 
 ### 1. Variáveis de Ambiente
@@ -59,7 +69,9 @@ VITE_SUPABASE_ANON_KEY=sua_chave_anonima
 
 ### 2. Comandos
 
-Instalar as dependências:
+Instalar as dependênci
+
+s:
 ```bash
 npm install
 ```

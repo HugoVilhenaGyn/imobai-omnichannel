@@ -5,13 +5,16 @@ import './App.css';
 import Sidebar from './components/Sidebar';
 import Topbar from './components/Topbar';
 import KanbanBoard from './components/KanbanBoard';
+import Dashboard from './components/Dashboard';
 import ChatOmni from './components/ChatOmni';
 import AIAgentConfig from './components/AIAgentConfig';
 import Settings from './components/Settings';
 import WhatsAppManager from './components/WhatsAppManager';
+import Atendimentos from './components/Atendimentos';
 import Login from './components/Login';
 import { supabase, checkConnection } from './lib/supabase';
-import { startAIEngine } from './lib/ai-engine';
+import { startAIEngine, processAILogic } from './lib/ai-engine';
+import { io as socketIO } from 'socket.io-client';
 import { AlertCircle, RefreshCw } from 'lucide-react';
 
 export default function App() {
@@ -72,23 +75,49 @@ export default function App() {
 
   // Iniciar Motor de IA do ImobAI quando houver sessão ativa
   useEffect(() => {
-    let aiChannel;
-    if (session) {
-      aiChannel = startAIEngine();
-    }
+    if (!session) return;
+    startAIEngine();
+  }, [session]);
+
+  // Listener direto: dispara IA quando mensagem WhatsApp chega (sem depender do Supabase Realtime)
+  useEffect(() => {
+    if (!session) return;
+    const socket = socketIO('http://localhost:3001', { transports: ['websocket', 'polling'] });
+
+    socket.on('wa_message_for_ai', (message) => {
+      console.log('🤖 App.jsx recebeu wa_message_for_ai:', message);
+      processAILogic(message);
+    });
+
     return () => {
-      // Cleanup para evitar listeners duplicados
-      if (aiChannel) supabase.removeChannel(aiChannel);
+      socket.off('wa_message_for_ai');
+      socket.disconnect();
     };
+  }, [session]);
+
+  // Fallback Realtime: garante que mensagens não sejam perdidas se o socket falhar durante restart
+  useEffect(() => {
+    if (!session) return;
+    const channel = supabase.channel('ai_realtime_fallback')
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'messages' }, (payload) => {
+        if (payload.new?.sender_type === 'user') {
+          // Delay de 2s: dá tempo ao socket disparar primeiro; dedup no ai-engine evita duplo processamento
+          setTimeout(() => processAILogic(payload.new), 2000);
+        }
+      })
+      .subscribe();
+    return () => { supabase.removeChannel(channel); };
   }, [session]);
 
   const getPageInfo = () => {
     const map = {
-      kanban:       { title: 'Dashboard',            subtitle: 'Gestão de leads: Venda, Locação e Captação' },
-      omni:         { title: 'Chat',                 subtitle: 'Orquestração de contatos e atendimento por IA' },
-      whatsapp:     { title: 'Contas de WhatsApp',   subtitle: 'Conexão e gerenciamento do número WhatsApp da conta' },
-      'ai-config':  { title: 'Agente Virtual IA',    subtitle: 'Treinamento, configurações e chaves de API do Cérebro (Gemini)' },
-      settings:     { title: 'Configurações',        subtitle: 'Gerencie sua conta, integrações, canais e preferências' },
+      kanban:        { title: 'Dashboard',            subtitle: 'Visão geral: métricas, pipeline e atividade recente' },
+      crm:           { title: 'CRM',                  subtitle: 'Pipeline Kanban — Vendas, Locação e Captação' },
+      omni:          { title: 'Chat',                 subtitle: 'Orquestração de contatos e atendimento por IA' },
+      whatsapp:      { title: 'Contas de WhatsApp',   subtitle: 'Conexão e gerenciamento do número WhatsApp da conta' },
+      atendimentos:  { title: 'Atendimentos',          subtitle: 'Todos os contatos com telefone, ID WhatsApp e status de atendimento' },
+      'ai-config':   { title: 'Agente Virtual IA',    subtitle: 'Treinamento, configurações e chaves de API do Cérebro (Gemini)' },
+      settings:      { title: 'Configurações',        subtitle: 'Gerencie sua conta, integrações, canais e preferências' },
     };
     return map[currentView] || { title: 'Em breve', subtitle: 'Este módulo está em desenvolvimento' };
   };
@@ -148,8 +177,21 @@ export default function App() {
         <div className="content-area">
           <AnimatePresence mode="wait">
             {currentView === 'kanban' && (
-              <motion.div 
+              <motion.div
                 key="kanban-view"
+                initial={{ opacity: 0, y: 10 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -10 }}
+                transition={{ duration: 0.3 }}
+                style={{ height: '100%', display: 'flex', flexDirection: 'column' }}
+              >
+                <Dashboard />
+              </motion.div>
+            )}
+
+            {currentView === 'crm' && (
+              <motion.div
+                key="crm-view"
                 initial={{ opacity: 0, y: 10 }}
                 animate={{ opacity: 1, y: 0 }}
                 exit={{ opacity: 0, y: -10 }}
@@ -207,6 +249,18 @@ export default function App() {
                 style={{ height: '100%', overflowY: 'auto', padding: '1.5rem' }}
               >
                 <WhatsAppManager />
+              </motion.div>
+            )}
+            {currentView === 'atendimentos' && (
+              <motion.div
+                key="atendimentos-view"
+                initial={{ opacity: 0, y: 10 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -10 }}
+                transition={{ duration: 0.3 }}
+                style={{ height: '100%', overflow: 'hidden' }}
+              >
+                <Atendimentos />
               </motion.div>
             )}
           </AnimatePresence>
