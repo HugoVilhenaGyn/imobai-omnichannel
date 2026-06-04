@@ -5,7 +5,7 @@ import { QRCodeSVG } from 'qrcode.react';
 import { io } from 'socket.io-client';
 import { formatPhone } from '../lib/formatPhone';
 
-const WA_SERVICE_URL = 'http://localhost:3001';
+const WA_SERVICE_URL = import.meta.env.VITE_WA_SERVICE_URL || 'http://localhost:3001';
 
 export default function WhatsAppManager() {
   const [qrCodeData, setQrCodeData]   = useState(null);

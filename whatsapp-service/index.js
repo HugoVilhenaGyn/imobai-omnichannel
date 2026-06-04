@@ -10,7 +10,8 @@ const { createClient } = require('@supabase/supabase-js');
 // Configuração do Supabase
 const supabaseUrl = process.env.VITE_SUPABASE_URL;
 const supabaseKey = process.env.VITE_SUPABASE_ANON_KEY;
-const supabase = createClient(supabaseUrl, supabaseKey);
+const ws = require('ws');
+const supabase = createClient(supabaseUrl, supabaseKey, { realtime: { transport: ws } });
 
 const app = express();
 app.use(cors());
@@ -36,7 +37,7 @@ function createWhatsAppClient() {
         authStrategy: new LocalAuth(),
         puppeteer: {
             headless: true,
-            executablePath: 'C:/Program Files/Google/Chrome/Application/chrome.exe',
+            executablePath: '/usr/bin/chromium-browser',
             args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-gpu', '--no-first-run', '--disable-dev-shm-usage']
         }
     });
