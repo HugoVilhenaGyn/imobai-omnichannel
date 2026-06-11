@@ -42,7 +42,7 @@ function createWhatsAppClient() {
         }
     });
 
-    // Timeout de autenticação: se demorar mais de 90s no AUTHENTICATING, reinicia
+    // Timeout de autenticação: se demorar mais de 150s no AUTHENTICATING, reinicia
     let authTimer = null;
     const clearAuthTimer = () => { if (authTimer) { clearTimeout(authTimer); authTimer = null; } };
 
@@ -60,16 +60,16 @@ function createWhatsAppClient() {
         connectionStatus = 'AUTHENTICATING';
         io.emit('status', connectionStatus);
 
-        // Se em 90s o ready não disparar, reinicia automaticamente
+        // Se em 150s o ready não disparar, reinicia automaticamente
         clearAuthTimer();
         authTimer = setTimeout(async () => {
             if (connectionStatus === 'AUTHENTICATING') {
-                console.error('⚠️ Timeout de autenticação (90s). Reiniciando cliente...');
+                console.error('⚠️ Timeout de autenticação (150s). Reiniciando cliente...');
                 isInitializing = false;
                 try { await c.destroy(); } catch (_) {}
                 await safeInitialize();
             }
-        }, 90000);
+        }, 150000);
     });
 
     c.on('auth_failure', msg => {
@@ -280,6 +280,12 @@ async function deleteSessionFiles() {
 }
 
 async function safeInitialize() {
+    if (!client) {
+        try { require('child_process').execSync("pkill -9 -f chromium-browser || true"); } catch (e) {}
+        for (const lf of ["SingletonLock","SingletonSocket","SingletonCookie"]) {
+            try { fs.rmSync(__dirname + "/.wwebjs_auth/session/" + lf, { force: true }); } catch (e) {}
+        }
+    }
     if (isInitializing) {
         console.log('⚠️ Já existe uma inicialização em andamento. Ignorando.');
         return;
@@ -295,7 +301,8 @@ async function safeInitialize() {
     if (client) {
         try { await client.destroy(); } catch (e) {}
         client = null;
-        await new Promise(r => setTimeout(r, 1500));
+        try { require('child_process').execSync("pkill -9 -f chromium-browser || true"); } catch (e) {}
+        await new Promise(r => setTimeout(r, 4000));
     }
 
     // Usuário pediu nova sessão (via restart_whatsapp após Desconectar):
@@ -315,6 +322,12 @@ async function safeInitialize() {
         await client.initialize();
     } catch (err) {
         console.error('❌ Erro ao inicializar cliente:', err.message);
+        try { if (client) await client.destroy(); } catch (e) {}
+        client = null;
+        try { require('child_process').execSync("pkill -9 -f chromium-browser || true"); } catch (e) {}
+        for (const lf of ["SingletonLock","SingletonSocket","SingletonCookie"]) {
+            try { fs.rmSync(__dirname + "/.wwebjs_auth/session/" + lf, { force: true }); } catch (e) {}
+        }
         isInitializing = false;
         connectionStatus = 'DISCONNECTED';
         io.emit('status', connectionStatus);
