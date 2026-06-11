@@ -262,7 +262,8 @@ function createWhatsAppClient() {
 
             // 4. Disparo direto do motor de IA (não depende do Supabase Realtime)
             if (savedMsg && savedMsg[0]) {
-                io.emit('wa_message_for_ai', savedMsg[0]);
+                // Chamada direta ao Gemini no servidor
+                processarComGemini(savedMsg[0]).catch(e => console.error('Erro Gemini:', e.message));
                 console.log(`🤖 Disparando IA para mensagem ${savedMsg[0].id}`);
             }
         } catch (err) {
@@ -565,6 +566,22 @@ app.get('/api/debug', (_req, res) => {
         phoneToChatIdEntries: Array.from(phoneToChatId.entries()).slice(0, 10),
     });
 });
+
+
+async function processarComGemini(msg) {
+  try {
+    const apiKey = process.env.VITE_GEMINI_API_KEY;
+    const { data: history } = await supabase.from('messages').select('*').eq('contact_id', msg.contact_id).order('created_at', { ascending: true }).limit(20);
+    const contents = (history || []).map(m => ({ role: m.sender_type === 'user' ? 'user' : 'model', parts: [{ text: m.content }] }));
+    const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ contents, systemInstruction: { parts: [{ text: 'Você é um corretor virtual simpático e prestativo da ImobAI. Sua função é responder clientes, descobrir o que eles querem e qualificar o contato.' }] } }) });
+    const json = await res.json(); console.log(`RESPOSTA BRUTA DO GEMINI:`, JSON.stringify(json));
+    const reply = json?.candidates?.[0]?.content?.parts?.[0]?.text;
+    const chatId = msg.whatsapp_chat_id || msg.contact_id;
+    if (client) { try { await client.sendMessage(chatId, reply); } catch(se) { console.error('Erro sendMessage:', se.message); } }
+    await supabase.from('messages').insert([{ contact_id: msg.contact_id, sender_type: 'ai', content: reply }]);
+    console.log('🤖 IA respondeu:', reply.substring(0, 80));
+  } catch(e) { console.error('Erro processarComGemini:', e.message); }
+}
 
 const PORT = process.env.PORT || 3001;
 server.listen(PORT, () => console.log(`🚀 WhatsApp Microservice rodando na porta ${PORT}`));
